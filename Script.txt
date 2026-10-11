@@ -1,69 +1,45 @@
 --[[
-    MM2 Full Feature Script
-    Target: Murder Mystery 2 (Roblox)
-    Executor: any with getgenv, hookmetamethod / hookfunction, Drawing (optional)
-    Features: Role ESP, Gun ESP, Coin AutoFarm, Silent Aim, Kill Aura,
-              Auto Grab Gun, Auto Shoot Murderer, Fly, Noclip, Speed,
-              Inf Jump, Teleports, Fling, Anti-AFK, Fullbright, Server Hop
+    MM2 Full Feature Script (fixed)
+    Murder Mystery 2
 ]]
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
 local TeleportService = game:GetService("TeleportService")
 local Lighting = game:GetService("Lighting")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local VirtualUser = game:GetService("VirtualUser")
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
---// Settings
 local Settings = {
-    -- Visuals
     ESP = true,
-    RoleESP = true,
     NameESP = true,
-    DistanceESP = true,
     GunESP = true,
-    Tracers = false,
-    Fullbright = false,
-
-    -- Combat
     SilentAim = true,
-    Aimbot = false,
     AimPart = "Head",
-    FOV = 180,
     Prediction = 0.13,
     KillAura = false,
     KillAuraRange = 18,
     AutoKillAll = false,
     AutoShootMurderer = true,
     AutoGrabGun = true,
-
-    -- Farm
     AutoFarm = false,
     FarmSpeed = 22,
-
-    -- Movement
     Fly = false,
     FlySpeed = 45,
     Noclip = false,
     WalkSpeed = 16,
     JumpPower = 50,
     InfJump = false,
-
-    -- Misc
     AntiAFK = true,
-    AntiFling = true,
+    Fullbright = false,
 }
 
---// State
 local State = {
     murderer = nil,
     sheriff = nil,
     hero = nil,
-    gunDrop = nil,
     highlights = {},
     billboards = {},
     flyBV = nil,
@@ -74,7 +50,6 @@ local State = {
     silentHooked = false,
 }
 
---// Utility
 local function getHRP(char)
     return char and char:FindFirstChild("HumanoidRootPart")
 end
@@ -144,7 +119,6 @@ local function findGunDrop()
     return nil
 end
 
---// ESP
 local function clearESP()
     for _, h in pairs(State.highlights) do
         if h and h.Parent then h:Destroy() end
@@ -171,7 +145,6 @@ local function createESP(plr)
         color = Color3.fromRGB(80, 255, 100)
     end
 
-    -- Highlight
     local hl = Instance.new("Highlight")
     hl.Name = "MM2ESP"
     hl.Adornee = char
@@ -183,7 +156,6 @@ local function createESP(plr)
     hl.Parent = char
     State.highlights[plr] = hl
 
-    -- Billboard
     local head = char:FindFirstChild("Head")
     if head and Settings.NameESP then
         local bb = Instance.new("BillboardGui")
@@ -221,10 +193,8 @@ local function updateESP()
         end
     end
 
-    -- Gun Drop ESP
     if Settings.GunESP then
         local drop = findGunDrop()
-        State.gunDrop = drop
         if drop and not drop:FindFirstChild("MM2GunHL") then
             local hl = Instance.new("Highlight")
             hl.Name = "MM2GunHL"
@@ -237,10 +207,9 @@ local function updateESP()
     end
 end
 
---// Silent Aim (hooks gun shoot)
 local function setupSilentAim()
     if State.silentHooked then return end
-    if not hookfunction then return end
+    if not hookfunction or not getconnections then return end
 
     local function hookTool(tool)
         local shoot = tool:FindFirstChild("Shoot")
@@ -275,34 +244,29 @@ local function setupSilentAim()
         end
     end
 
-    local function scan()
-        local char = LocalPlayer.Character
-        local bp = LocalPlayer:FindFirstChildOfClass("Backpack")
-        if char then
-            for _, t in ipairs(char:GetChildren()) do
-                if t:IsA("Tool") and t.Name:lower():find("gun") then
-                    hookTool(t)
-                end
-            end
-        end
-        if bp then
-            for _, t in ipairs(bp:GetChildren()) do
-                if t:IsA("Tool") and t.Name:lower():find("gun") then
-                    hookTool(t)
-                end
-            end
-        end
-    end
-
     task.spawn(function()
         while true do
-            scan()
+            local char = LocalPlayer.Character
+            local bp = LocalPlayer:FindFirstChildOfClass("Backpack")
+            if char then
+                for _, t in ipairs(char:GetChildren()) do
+                    if t:IsA("Tool") and t.Name:lower():find("gun") then
+                        hookTool(t)
+                    end
+                end
+            end
+            if bp then
+                for _, t in ipairs(bp:GetChildren()) do
+                    if t:IsA("Tool") and t.Name:lower():find("gun") then
+                        hookTool(t)
+                    end
+                end
+            end
             task.wait(1)
         end
     end)
 end
 
---// Kill Aura / Auto Kill
 local function knifeAttack()
     local char = LocalPlayer.Character
     if not char then return end
@@ -350,29 +314,28 @@ local function startKillAura()
     end)
 end
 
---// Auto Grab Gun + Auto Shoot
 local function autoGunLogic()
     task.spawn(function()
         while true do
             task.wait(0.35)
-            if not Settings.AutoGrabGun and not Settings.AutoShootMurderer then continue end
+            if Settings.AutoGrabGun or Settings.AutoShootMurderer then
+                local role = getRole(LocalPlayer)
+                local drop = findGunDrop()
 
-            local role = getRole(LocalPlayer)
-            local drop = findGunDrop()
-
-            if Settings.AutoGrabGun and drop and (role == "Innocent" or role == "None") then
-                local hrp = getHRP(LocalPlayer.Character)
-                if hrp then
-                    hrp.CFrame = drop.CFrame + Vector3.new(0, 3, 0)
+                if Settings.AutoGrabGun and drop and (role == "Innocent" or role == "None") then
+                    local hrp = getHRP(LocalPlayer.Character)
+                    if hrp then
+                        hrp.CFrame = drop.CFrame + Vector3.new(0, 3, 0)
+                    end
                 end
-            end
 
-            if Settings.AutoShootMurderer and (role == "Sheriff" or role == "Hero") then
-                refreshRoles()
-                if State.murderer and isAlive(State.murderer) then
-                    local gun = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
-                    if gun and gun.Name:lower():find("gun") then
-                        gun:Activate()
+                if Settings.AutoShootMurderer and (role == "Sheriff" or role == "Hero") then
+                    refreshRoles()
+                    if State.murderer and isAlive(State.murderer) then
+                        local gun = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
+                        if gun and gun.Name:lower():find("gun") then
+                            gun:Activate()
+                        end
                     end
                 end
             end
@@ -380,24 +343,12 @@ local function autoGunLogic()
     end)
 end
 
---// Coin AutoFarm
 local function getNearestCoin()
     local closest, dist = nil, math.huge
     local hrp = getHRP(LocalPlayer.Character)
     if not hrp then return nil end
 
     for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart") and (obj.Name == "Coin" or obj.Name:lower():find("coin") or obj.Name == "CoinContainer") then
-            local d = (obj.Position - hrp.Position).Magnitude
-            if d < dist then
-                dist = d
-                closest = obj
-            end
-        end
-    end
-    -- also check common coin folders
-    local map = workspace:FindFirstChild("Map") or workspace
-    for _, obj in ipairs(map:GetDescendants()) do
         if obj:IsA("BasePart") and obj.Name:lower():find("coin") then
             local d = (obj.Position - hrp.Position).Magnitude
             if d < dist then
@@ -420,14 +371,12 @@ local function startFarm()
             local dir = (target - hrp.Position)
             if dir.Magnitude > 1 then
                 hrp.CFrame = hrp.CFrame:Lerp(CFrame.new(target), 0.15)
-                -- simple velocity assist
                 hrp.AssemblyLinearVelocity = dir.Unit * Settings.FarmSpeed
             end
         end
     end)
 end
 
---// Movement
 local function setFly(on)
     local hrp = getHRP(LocalPlayer.Character)
     local hum = getHum(LocalPlayer.Character)
@@ -453,12 +402,12 @@ local function setFly(on)
             if not Settings.Fly or not State.flyBV then return end
             local camCF = Camera.CFrame
             local move = Vector3.zero
-            if UserInputService:IsKeyDown(Enum.KeyCode.W) then move += camCF.LookVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.S) then move -= camCF.LookVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.A) then move -= camCF.RightVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.D) then move += camCF.RightVector end
-            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then move += Vector3.yAxis end
-            if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then move -= Vector3.yAxis end
+            if UserInputService:IsKeyDown(Enum.KeyCode.W) then move = move + camCF.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.S) then move = move - camCF.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.A) then move = move - camCF.RightVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.D) then move = move + camCF.RightVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then move = move + Vector3.yAxis end
+            if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then move = move - Vector3.yAxis end
 
             if move.Magnitude > 0 then
                 State.flyBV.Velocity = move.Unit * Settings.FlySpeed
@@ -468,7 +417,7 @@ local function setFly(on)
             State.flyBG.CFrame = camCF
         end)
     else
-        RunService:UnbindFromRenderStep("MM2Fly")
+        pcall(function() RunService:UnbindFromRenderStep("MM2Fly") end)
         if State.flyBV then State.flyBV:Destroy() State.flyBV = nil end
         if State.flyBG then State.flyBG:Destroy() State.flyBG = nil end
         if hum then hum.PlatformStand = false end
@@ -496,21 +445,9 @@ local function applySpeedJump()
     if hum then
         hum.WalkSpeed = Settings.WalkSpeed
         hum.JumpPower = Settings.JumpPower
-        hum.JumpHeight = Settings.JumpPower / 3
     end
 end
 
---// Anti AFK
-local function startAntiAFK()
-    LocalPlayer.Idled:Connect(function()
-        if Settings.AntiAFK then
-            VirtualUser:CaptureController()
-            VirtualUser:ClickButton2(Vector2.new())
-        end
-    end)
-end
-
---// Fullbright
 local function setFullbright(on)
     if on then
         Lighting.Brightness = 2
@@ -524,17 +461,19 @@ local function setFullbright(on)
     end
 end
 
---// GUI (simple clean dark)
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "MM2Full"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-ScreenGui.Parent = game:GetService("CoreGui")
+pcall(function() ScreenGui.Parent = game:GetService("CoreGui") end)
+if not ScreenGui.Parent then
+    ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+end
 
 local Main = Instance.new("Frame")
 Main.Name = "Main"
-Main.Size = UDim2.new(0, 320, 0, 420)
-Main.Position = UDim2.new(0.5, -160, 0.5, -210)
+Main.Size = UDim2.new(0, 320, 0, 440)
+Main.Position = UDim2.new(0.5, -160, 0.5, -220)
 Main.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
 Main.BorderSizePixel = 0
 Main.Active = true
@@ -548,7 +487,7 @@ UICorner.Parent = Main
 local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, 0, 0, 36)
 Title.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
-Title.Text = "  MM2 Full  |  all features"
+Title.Text = "  MM2 Full  |  fixed"
 Title.TextColor3 = Color3.fromRGB(240, 240, 240)
 Title.Font = Enum.Font.GothamBold
 Title.TextSize = 15
@@ -564,7 +503,7 @@ Scrolling.Size = UDim2.new(1, -16, 1, -50)
 Scrolling.Position = UDim2.new(0, 8, 0, 42)
 Scrolling.BackgroundTransparency = 1
 Scrolling.ScrollBarThickness = 4
-Scrolling.CanvasSize = UDim2.new(0, 0, 0, 780)
+Scrolling.CanvasSize = UDim2.new(0, 0, 0, 820)
 Scrolling.Parent = Main
 
 local layout = Instance.new("UIListLayout")
@@ -614,7 +553,7 @@ local function makeToggle(name, key, default)
         if key == "Fly" then setFly(Settings.Fly) end
         if key == "Noclip" then setNoclip(Settings.Noclip) end
         if key == "Fullbright" then setFullbright(Settings.Fullbright) end
-        if key == "AutoFarm" then if Settings.AutoFarm then startFarm() end end
+        if key == "AutoFarm" and Settings.AutoFarm then startFarm() end
         if key == "KillAura" or key == "AutoKillAll" then startKillAura() end
         if key == "ESP" then updateESP() end
     end)
@@ -632,4 +571,47 @@ local function makeButton(name, callback)
 
     local c = Instance.new("UICorner")
     c.CornerRadius = UDim.new(0, 6)
-    
+    c.Parent = btn
+
+    btn.MouseButton1Click:Connect(callback)
+end
+
+makeToggle("Role ESP", "ESP", true)
+makeToggle("Gun Drop ESP", "GunESP", true)
+makeToggle("Silent Aim", "SilentAim", true)
+makeToggle("Kill Aura (Murderer)", "KillAura", false)
+makeToggle("Auto Kill All (Murderer)", "AutoKillAll", false)
+makeToggle("Auto Grab Gun", "AutoGrabGun", true)
+makeToggle("Auto Shoot Murderer", "AutoShootMurderer", true)
+makeToggle("Coin AutoFarm", "AutoFarm", false)
+makeToggle("Fly", "Fly", false)
+makeToggle("Noclip", "Noclip", false)
+makeToggle("Infinite Jump", "InfJump", false)
+makeToggle("Fullbright", "Fullbright", false)
+makeToggle("Anti-AFK", "AntiAFK", true)
+
+makeButton("Teleport to Murderer", function()
+    refreshRoles()
+    if State.murderer and getHRP(State.murderer.Character) then
+        getHRP(LocalPlayer.Character).CFrame = getHRP(State.murderer.Character).CFrame * CFrame.new(0, 0, 3)
+    end
+end)
+
+makeButton("Teleport to Sheriff / Hero", function()
+    refreshRoles()
+    local target = State.hero or State.sheriff
+    if target and getHRP(target.Character) then
+        getHRP(LocalPlayer.Character).CFrame = getHRP(target.Character).CFrame * CFrame.new(0, 0, 3)
+    end
+end)
+
+makeButton("Teleport to Gun Drop", function()
+    local drop = findGunDrop()
+    if drop then
+        getHRP(LocalPlayer.Character).CFrame = drop.CFrame + Vector3.new(0, 3, 0)
+    end
+end)
+
+makeButton("Fling Murderer", function()
+    refreshRoles()
+    if State.murderer and g
