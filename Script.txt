@@ -1,0 +1,635 @@
+--[[
+    MM2 Full Feature Script
+    Target: Murder Mystery 2 (Roblox)
+    Executor: any with getgenv, hookmetamethod / hookfunction, Drawing (optional)
+    Features: Role ESP, Gun ESP, Coin AutoFarm, Silent Aim, Kill Aura,
+              Auto Grab Gun, Auto Shoot Murderer, Fly, Noclip, Speed,
+              Inf Jump, Teleports, Fling, Anti-AFK, Fullbright, Server Hop
+]]
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local TeleportService = game:GetService("TeleportService")
+local Lighting = game:GetService("Lighting")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local VirtualUser = game:GetService("VirtualUser")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+--// Settings
+local Settings = {
+    -- Visuals
+    ESP = true,
+    RoleESP = true,
+    NameESP = true,
+    DistanceESP = true,
+    GunESP = true,
+    Tracers = false,
+    Fullbright = false,
+
+    -- Combat
+    SilentAim = true,
+    Aimbot = false,
+    AimPart = "Head",
+    FOV = 180,
+    Prediction = 0.13,
+    KillAura = false,
+    KillAuraRange = 18,
+    AutoKillAll = false,
+    AutoShootMurderer = true,
+    AutoGrabGun = true,
+
+    -- Farm
+    AutoFarm = false,
+    FarmSpeed = 22,
+
+    -- Movement
+    Fly = false,
+    FlySpeed = 45,
+    Noclip = false,
+    WalkSpeed = 16,
+    JumpPower = 50,
+    InfJump = false,
+
+    -- Misc
+    AntiAFK = true,
+    AntiFling = true,
+}
+
+--// State
+local State = {
+    murderer = nil,
+    sheriff = nil,
+    hero = nil,
+    gunDrop = nil,
+    highlights = {},
+    billboards = {},
+    flyBV = nil,
+    flyBG = nil,
+    noclipConn = nil,
+    farmConn = nil,
+    auraConn = nil,
+    silentHooked = false,
+}
+
+--// Utility
+local function getHRP(char)
+    return char and char:FindFirstChild("HumanoidRootPart")
+end
+
+local function getHum(char)
+    return char and char:FindFirstChildOfClass("Humanoid")
+end
+
+local function isAlive(plr)
+    local char = plr.Character
+    local hum = getHum(char)
+    return char and hum and hum.Health > 0
+end
+
+local function hasTool(container, keyword)
+    if not container then return false end
+    for _, v in ipairs(container:GetChildren()) do
+        if v:IsA("Tool") and v.Name:lower():find(keyword:lower()) then
+            return true
+        end
+    end
+    return false
+end
+
+local function getRole(plr)
+    if not plr or not plr.Character then return "None" end
+    local char = plr.Character
+    local bp = plr:FindFirstChildOfClass("Backpack")
+
+    if hasTool(char, "Knife") or hasTool(bp, "Knife") then
+        return "Murderer"
+    end
+    if hasTool(char, "Gun") or hasTool(bp, "Gun") then
+        if State.sheriff and State.sheriff \~= plr then
+            return "Hero"
+        end
+        return "Sheriff"
+    end
+    return "Innocent"
+end
+
+local function refreshRoles()
+    State.murderer = nil
+    State.sheriff = nil
+    State.hero = nil
+
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if isAlive(plr) then
+            local role = getRole(plr)
+            if role == "Murderer" then
+                State.murderer = plr
+            elseif role == "Sheriff" then
+                State.sheriff = plr
+            elseif role == "Hero" then
+                State.hero = plr
+            end
+        end
+    end
+end
+
+local function findGunDrop()
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("BasePart") and (obj.Name == "GunDrop" or obj.Name:lower():find("gundrop")) then
+            return obj
+        end
+    end
+    return nil
+end
+
+--// ESP
+local function clearESP()
+    for _, h in pairs(State.highlights) do
+        if h and h.Parent then h:Destroy() end
+    end
+    for _, b in pairs(State.billboards) do
+        if b and b.Parent then b:Destroy() end
+    end
+    State.highlights = {}
+    State.billboards = {}
+end
+
+local function createESP(plr)
+    if plr == LocalPlayer then return end
+    local char = plr.Character
+    if not char then return end
+
+    local role = getRole(plr)
+    local color = Color3.fromRGB(180, 180, 180)
+    if role == "Murderer" then
+        color = Color3.fromRGB(255, 40, 40)
+    elseif role == "Sheriff" or role == "Hero" then
+        color = Color3.fromRGB(40, 140, 255)
+    elseif role == "Innocent" then
+        color = Color3.fromRGB(80, 255, 100)
+    end
+
+    -- Highlight
+    local hl = Instance.new("Highlight")
+    hl.Name = "MM2ESP"
+    hl.Adornee = char
+    hl.FillColor = color
+    hl.OutlineColor = color
+    hl.FillTransparency = 0.55
+    hl.OutlineTransparency = 0
+    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    hl.Parent = char
+    State.highlights[plr] = hl
+
+    -- Billboard
+    local head = char:FindFirstChild("Head")
+    if head and Settings.NameESP then
+        local bb = Instance.new("BillboardGui")
+        bb.Name = "MM2Name"
+        bb.Adornee = head
+        bb.Size = UDim2.new(0, 200, 0, 50)
+        bb.StudsOffset = Vector3.new(0, 2.4, 0)
+        bb.AlwaysOnTop = true
+        bb.Parent = head
+
+        local label = Instance.new("TextLabel")
+        label.Size = UDim2.new(1, 0, 1, 0)
+        label.BackgroundTransparency = 1
+        label.Text = plr.DisplayName .. " [" .. role .. "]"
+        label.TextColor3 = color
+        label.TextStrokeTransparency = 0.4
+        label.Font = Enum.Font.GothamBold
+        label.TextSize = 14
+        label.Parent = bb
+
+        State.billboards[plr] = bb
+    end
+end
+
+local function updateESP()
+    if not Settings.ESP then
+        clearESP()
+        return
+    end
+    refreshRoles()
+    clearESP()
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if isAlive(plr) then
+            createESP(plr)
+        end
+    end
+
+    -- Gun Drop ESP
+    if Settings.GunESP then
+        local drop = findGunDrop()
+        State.gunDrop = drop
+        if drop and not drop:FindFirstChild("MM2GunHL") then
+            local hl = Instance.new("Highlight")
+            hl.Name = "MM2GunHL"
+            hl.Adornee = drop
+            hl.FillColor = Color3.fromRGB(255, 220, 50)
+            hl.OutlineColor = Color3.fromRGB(255, 255, 100)
+            hl.FillTransparency = 0.3
+            hl.Parent = drop
+        end
+    end
+end
+
+--// Silent Aim (hooks gun shoot)
+local function setupSilentAim()
+    if State.silentHooked then return end
+    if not hookfunction then return end
+
+    local function hookTool(tool)
+        local shoot = tool:FindFirstChild("Shoot")
+        if not shoot or not shoot:IsA("BindableEvent") then return end
+
+        for _, conn in ipairs(getconnections(shoot.Event)) do
+            if conn.Function then
+                local old
+                old = hookfunction(conn.Function, function(...)
+                    local args = table.pack(...)
+                    if Settings.SilentAim then
+                        refreshRoles()
+                        local target = State.murderer
+                        if target and isAlive(target) then
+                            local part = target.Character and target.Character:FindFirstChild(Settings.AimPart)
+                            if part then
+                                local pos = part.Position + (part.AssemblyLinearVelocity * Settings.Prediction)
+                                for i = 1, args.n do
+                                    if typeof(args[i]) == "CFrame" then
+                                        args[i] = CFrame.new(pos)
+                                        break
+                                    end
+                                end
+                            end
+                        end
+                    end
+                    return old(table.unpack(args, 1, args.n))
+                end)
+                State.silentHooked = true
+                break
+            end
+        end
+    end
+
+    local function scan()
+        local char = LocalPlayer.Character
+        local bp = LocalPlayer:FindFirstChildOfClass("Backpack")
+        if char then
+            for _, t in ipairs(char:GetChildren()) do
+                if t:IsA("Tool") and t.Name:lower():find("gun") then
+                    hookTool(t)
+                end
+            end
+        end
+        if bp then
+            for _, t in ipairs(bp:GetChildren()) do
+                if t:IsA("Tool") and t.Name:lower():find("gun") then
+                    hookTool(t)
+                end
+            end
+        end
+    end
+
+    task.spawn(function()
+        while true do
+            scan()
+            task.wait(1)
+        end
+    end)
+end
+
+--// Kill Aura / Auto Kill
+local function knifeAttack()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local knife = char:FindFirstChildOfClass("Tool")
+    if not knife or not knife.Name:lower():find("knife") then
+        local bp = LocalPlayer:FindFirstChildOfClass("Backpack")
+        if bp then
+            for _, t in ipairs(bp:GetChildren()) do
+                if t:IsA("Tool") and t.Name:lower():find("knife") then
+                    t.Parent = char
+                    knife = t
+                    break
+                end
+            end
+        end
+    end
+    if knife then
+        knife:Activate()
+    end
+end
+
+local function startKillAura()
+    if State.auraConn then State.auraConn:Disconnect() end
+    State.auraConn = RunService.Heartbeat:Connect(function()
+        if not Settings.KillAura and not Settings.AutoKillAll then return end
+        if getRole(LocalPlayer) \~= "Murderer" then return end
+
+        local myHRP = getHRP(LocalPlayer.Character)
+        if not myHRP then return end
+
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr \~= LocalPlayer and isAlive(plr) then
+                local hrp = getHRP(plr.Character)
+                if hrp then
+                    local dist = (hrp.Position - myHRP.Position).Magnitude
+                    if Settings.AutoKillAll or dist <= Settings.KillAuraRange then
+                        if Settings.AutoKillAll then
+                            myHRP.CFrame = hrp.CFrame * CFrame.new(0, 0, 2)
+                        end
+                        knifeAttack()
+                    end
+                end
+            end
+        end
+    end)
+end
+
+--// Auto Grab Gun + Auto Shoot
+local function autoGunLogic()
+    task.spawn(function()
+        while true do
+            task.wait(0.35)
+            if not Settings.AutoGrabGun and not Settings.AutoShootMurderer then continue end
+
+            local role = getRole(LocalPlayer)
+            local drop = findGunDrop()
+
+            if Settings.AutoGrabGun and drop and (role == "Innocent" or role == "None") then
+                local hrp = getHRP(LocalPlayer.Character)
+                if hrp then
+                    hrp.CFrame = drop.CFrame + Vector3.new(0, 3, 0)
+                end
+            end
+
+            if Settings.AutoShootMurderer and (role == "Sheriff" or role == "Hero") then
+                refreshRoles()
+                if State.murderer and isAlive(State.murderer) then
+                    local gun = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
+                    if gun and gun.Name:lower():find("gun") then
+                        gun:Activate()
+                    end
+                end
+            end
+        end
+    end)
+end
+
+--// Coin AutoFarm
+local function getNearestCoin()
+    local closest, dist = nil, math.huge
+    local hrp = getHRP(LocalPlayer.Character)
+    if not hrp then return nil end
+
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("BasePart") and (obj.Name == "Coin" or obj.Name:lower():find("coin") or obj.Name == "CoinContainer") then
+            local d = (obj.Position - hrp.Position).Magnitude
+            if d < dist then
+                dist = d
+                closest = obj
+            end
+        end
+    end
+    -- also check common coin folders
+    local map = workspace:FindFirstChild("Map") or workspace
+    for _, obj in ipairs(map:GetDescendants()) do
+        if obj:IsA("BasePart") and obj.Name:lower():find("coin") then
+            local d = (obj.Position - hrp.Position).Magnitude
+            if d < dist then
+                dist = d
+                closest = obj
+            end
+        end
+    end
+    return closest
+end
+
+local function startFarm()
+    if State.farmConn then State.farmConn:Disconnect() end
+    State.farmConn = RunService.Heartbeat:Connect(function()
+        if not Settings.AutoFarm then return end
+        local coin = getNearestCoin()
+        local hrp = getHRP(LocalPlayer.Character)
+        if coin and hrp then
+            local target = coin.Position + Vector3.new(0, 2.5, 0)
+            local dir = (target - hrp.Position)
+            if dir.Magnitude > 1 then
+                hrp.CFrame = hrp.CFrame:Lerp(CFrame.new(target), 0.15)
+                -- simple velocity assist
+                hrp.AssemblyLinearVelocity = dir.Unit * Settings.FarmSpeed
+            end
+        end
+    end)
+end
+
+--// Movement
+local function setFly(on)
+    local hrp = getHRP(LocalPlayer.Character)
+    local hum = getHum(LocalPlayer.Character)
+    if not hrp or not hum then return end
+
+    if on then
+        if State.flyBV then State.flyBV:Destroy() end
+        if State.flyBG then State.flyBG:Destroy() end
+
+        State.flyBV = Instance.new("BodyVelocity")
+        State.flyBV.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+        State.flyBV.Velocity = Vector3.zero
+        State.flyBV.Parent = hrp
+
+        State.flyBG = Instance.new("BodyGyro")
+        State.flyBG.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
+        State.flyBG.P = 1e4
+        State.flyBG.Parent = hrp
+
+        hum.PlatformStand = true
+
+        RunService:BindToRenderStep("MM2Fly", Enum.RenderPriority.Camera.Value, function()
+            if not Settings.Fly or not State.flyBV then return end
+            local camCF = Camera.CFrame
+            local move = Vector3.zero
+            if UserInputService:IsKeyDown(Enum.KeyCode.W) then move += camCF.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.S) then move -= camCF.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.A) then move -= camCF.RightVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.D) then move += camCF.RightVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then move += Vector3.yAxis end
+            if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then move -= Vector3.yAxis end
+
+            if move.Magnitude > 0 then
+                State.flyBV.Velocity = move.Unit * Settings.FlySpeed
+            else
+                State.flyBV.Velocity = Vector3.zero
+            end
+            State.flyBG.CFrame = camCF
+        end)
+    else
+        RunService:UnbindFromRenderStep("MM2Fly")
+        if State.flyBV then State.flyBV:Destroy() State.flyBV = nil end
+        if State.flyBG then State.flyBG:Destroy() State.flyBG = nil end
+        if hum then hum.PlatformStand = false end
+    end
+end
+
+local function setNoclip(on)
+    if State.noclipConn then State.noclipConn:Disconnect() State.noclipConn = nil end
+    if on then
+        State.noclipConn = RunService.Stepped:Connect(function()
+            local char = LocalPlayer.Character
+            if char then
+                for _, part in ipairs(char:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        part.CanCollide = false
+                    end
+                end
+            end
+        end)
+    end
+end
+
+local function applySpeedJump()
+    local hum = getHum(LocalPlayer.Character)
+    if hum then
+        hum.WalkSpeed = Settings.WalkSpeed
+        hum.JumpPower = Settings.JumpPower
+        hum.JumpHeight = Settings.JumpPower / 3
+    end
+end
+
+--// Anti AFK
+local function startAntiAFK()
+    LocalPlayer.Idled:Connect(function()
+        if Settings.AntiAFK then
+            VirtualUser:CaptureController()
+            VirtualUser:ClickButton2(Vector2.new())
+        end
+    end)
+end
+
+--// Fullbright
+local function setFullbright(on)
+    if on then
+        Lighting.Brightness = 2
+        Lighting.ClockTime = 14
+        Lighting.FogEnd = 1e6
+        Lighting.GlobalShadows = false
+        Lighting.OutdoorAmbient = Color3.fromRGB(180, 180, 180)
+    else
+        Lighting.Brightness = 1
+        Lighting.GlobalShadows = true
+    end
+end
+
+--// GUI (simple clean dark)
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "MM2Full"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.Parent = game:GetService("CoreGui")
+
+local Main = Instance.new("Frame")
+Main.Name = "Main"
+Main.Size = UDim2.new(0, 320, 0, 420)
+Main.Position = UDim2.new(0.5, -160, 0.5, -210)
+Main.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+Main.BorderSizePixel = 0
+Main.Active = true
+Main.Draggable = true
+Main.Parent = ScreenGui
+
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 10)
+UICorner.Parent = Main
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 36)
+Title.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
+Title.Text = "  MM2 Full  |  all features"
+Title.TextColor3 = Color3.fromRGB(240, 240, 240)
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 15
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = Main
+
+local TitleCorner = Instance.new("UICorner")
+TitleCorner.CornerRadius = UDim.new(0, 10)
+TitleCorner.Parent = Title
+
+local Scrolling = Instance.new("ScrollingFrame")
+Scrolling.Size = UDim2.new(1, -16, 1, -50)
+Scrolling.Position = UDim2.new(0, 8, 0, 42)
+Scrolling.BackgroundTransparency = 1
+Scrolling.ScrollBarThickness = 4
+Scrolling.CanvasSize = UDim2.new(0, 0, 0, 780)
+Scrolling.Parent = Main
+
+local layout = Instance.new("UIListLayout")
+layout.Padding = UDim.new(0, 6)
+layout.Parent = Scrolling
+
+local function makeToggle(name, key, default)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, 0, 0, 32)
+    frame.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
+    frame.Parent = Scrolling
+
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 6)
+    c.Parent = frame
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -50, 1, 0)
+    label.Position = UDim2.new(0, 10, 0, 0)
+    label.BackgroundTransparency = 1
+    label.Text = name
+    label.TextColor3 = Color3.fromRGB(220, 220, 220)
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 13
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = frame
+
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, 40, 0, 22)
+    btn.Position = UDim2.new(1, -46, 0.5, -11)
+    btn.BackgroundColor3 = default and Color3.fromRGB(60, 180, 90) or Color3.fromRGB(60, 60, 70)
+    btn.Text = default and "ON" or "OFF"
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 11
+    btn.Parent = frame
+
+    local bc = Instance.new("UICorner")
+    bc.CornerRadius = UDim.new(0, 4)
+    bc.Parent = btn
+
+    btn.MouseButton1Click:Connect(function()
+        Settings[key] = not Settings[key]
+        btn.Text = Settings[key] and "ON" or "OFF"
+        btn.BackgroundColor3 = Settings[key] and Color3.fromRGB(60, 180, 90) or Color3.fromRGB(60, 60, 70)
+
+        if key == "Fly" then setFly(Settings.Fly) end
+        if key == "Noclip" then setNoclip(Settings.Noclip) end
+        if key == "Fullbright" then setFullbright(Settings.Fullbright) end
+        if key == "AutoFarm" then if Settings.AutoFarm then startFarm() end end
+        if key == "KillAura" or key == "AutoKillAll" then startKillAura() end
+        if key == "ESP" then updateESP() end
+    end)
+end
+
+local function makeButton(name, callback)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 32)
+    btn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+    btn.Text = name
+    btn.TextColor3 = Color3.fromRGB(230, 230, 230)
+    btn.Font = Enum.Font.Gotham
+    btn.TextSize = 13
+    btn.Parent = Scrolling
+
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 6)
+    
